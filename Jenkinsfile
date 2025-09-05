@@ -1,42 +1,48 @@
 pipeline {
     agent any
-    stages{
-        stage('git cloned'){
-            steps{
-                git url:'https://github.com/akshu20791/php-project/', branch: "master"
-              
+
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')  // Jenkins credential ID
+        DOCKERHUB_USER = "YOUR_DOCKERHUB_USERNAME"              // replace with your DockerHub username
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git 'https://github.com/Aiwith-keyur/php-project.git'
             }
         }
-        stage('Build docker image'){
-            steps{
-                script{
-                    sh 'docker build -t akshu20791/akshatnewimg6july:v1 .'
-                    sh 'docker images'
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def img = docker.build("${DOCKERHUB_USER}/php-project:${BUILD_NUMBER}")
                 }
             }
         }
-          stage('Docker login') {
+
+        stage('Push to DockerHub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-                    sh "echo $PASS | docker login -u $USER --password-stdin"
-                    sh 'docker push akshu20791/akshatnewimg6july:v1'
-                }
-            }
-        }
-        
-     stage('Deploy') {
-            steps {
-               script {
-                   def dockerrm = 'sudo docker rm -f My-first-containe2211 || true'
-                    def dockerCmd = 'sudo docker run -itd --name My-first-containe2211 -p 8083:80 akshu20791/akshatnewimg6july:v1'
-                    sshagent(['sshkeypair']) {
-                        //chnage the private ip in below code
-                        // sh "docker run -itd --name My-first-containe2111 -p 8083:80 akshu20791/2febimg:v1"
-                         sh "ssh -o StrictHostKeyChecking=no ubuntu@172.31.17.188 ${dockerrm}"
-                         sh "ssh -o StrictHostKeyChecking=no ubuntu@172.31.17.188 ${dockerCmd}"
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', 'dockerhub-creds') {
+                        def img = docker.image("${DOCKERHUB_USER}/php-project:${BUILD_NUMBER}")
+                        img.push()
+                        img.push("latest")  // also tag as latest
                     }
                 }
             }
         }
+
+        stage('Deploy on Node') {
+            agent { label 'deploy-node' }  // make sure you created a node with this label
+            steps {
+                sh '''
+                    docker pull ${DOCKERHUB_USER}/php-project:${BUILD_NUMBER}
+                    docker rm -f phpproject || true
+                    docker run -d --name phpproject -p 8083:80 ${DOCKERHUB_USER}/php-project:${BUILD_NUMBER}
+                '''
+            }
+        }
     }
 }
+
